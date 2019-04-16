@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 type connectionError struct {
@@ -32,10 +35,10 @@ type connConnection struct {
 }
 
 type chanConnection struct {
-	s       *Server
-	channel chan []byte
-	addr    *net.UDPAddr
-	timeout time.Duration
+	s             *Server
+	channel       chan []byte
+	srcAddr, addr *net.UDPAddr
+	timeout       time.Duration
 }
 
 func (c *chanConnection) sendTo(data []byte, addr *net.UDPAddr) error {
@@ -43,7 +46,20 @@ func (c *chanConnection) sendTo(data []byte, addr *net.UDPAddr) error {
 	c.s.Lock()
 	conn := c.s.conn
 	c.s.Unlock()
-	_, err = conn.WriteTo(data, addr)
+	if conn, ok := conn.(*net.UDPConn); !ok {
+		_, err = conn.WriteTo(data, addr)
+	} else {
+		srcAddr := c.srcAddr.IP.To4()
+		var cmm []byte
+		if srcAddr != nil {
+			cm := &ipv4.ControlMessage{Src: srcAddr}
+			cmm = cm.Marshal()
+		} else {
+			cm := &ipv6.ControlMessage{Src: c.srcAddr.IP}
+			cmm = cm.Marshal()
+		}
+		_, _, err = conn.WriteMsgUDP(data, cmm, c.addr)
+	}
 	return err
 }
 
